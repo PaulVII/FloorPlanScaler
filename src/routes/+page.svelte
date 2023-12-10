@@ -1,26 +1,35 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	let imageCanvas: HTMLCanvasElement;
 	let roomCanvas: HTMLCanvasElement;
 	let files: FileList;
 
 	// factor the image is scaled by on the canvas
 	// load room picture
-	let scaleFactor = 1;
-	$: if (files && files[0]) {
+	let oldImage: File;
+	$: if (browser)
+		for (const canvas of [imageCanvas, roomCanvas]) {
+			if (!canvas) continue;
+			console.log('Setting canvas');
+			canvas.width = (window.innerWidth * 2) / 3;
+			canvas.height = window.innerHeight;
+		}
+	$: if (files && files[0] && files[0] != oldImage) {
+		oldImage = files[0];
 		const reader = new FileReader();
+
 		const ctx = imageCanvas.getContext('2d');
 		reader.onload = (evt) => {
 			const image = new Image();
-			console.log('loaded reader');
 			image.onload = () => {
-				for (const canvas of [roomCanvas, imageCanvas]) {
-					canvas.width = image.width;
-					canvas.height = image.height;
-					scaleFactor = 1000 / image.width;
+				let { width, height } = imageCanvas;
+				ctx!.clearRect(0, 0, width, height);
 
-					canvas.style.transform = `scale(${scaleFactor})`;
-				}
-				ctx!.drawImage(image, 0, 0);
+				let canvasAspect = width / height;
+				let imageAspect = image.width / image.height;
+				if (canvasAspect < imageAspect) height *= canvasAspect / imageAspect;
+				else width /= canvasAspect / imageAspect;
+				ctx!.drawImage(image, 0, 0, width, height);
 			};
 			image.src = (evt.target?.result as string) ?? '';
 		};
@@ -40,15 +49,48 @@
 	let finishedRooms: Room[] = [];
 	let currentRoom: Room | undefined;
 	$: allRooms = currentRoom ? [...finishedRooms, currentRoom] : [...finishedRooms];
-	$: pixelPerUnit = calculatePixelsPerUnit(allRooms, totalSize);
-	$: drawRooms(allRooms, pixelPerUnit);
+	$: unitsPerPixel = calculatePixelsPerUnit(allRooms, totalSize);
+	$: drawRooms(allRooms, unitsPerPixel);
+
+	function calculatePixelsPerUnit(allRooms: Room[], totalSize: number) {
+		return Math.sqrt(
+			totalSize /
+				allRooms.reduce((prev, room) => prev + Math.abs(room.height * room.width * room.factor), 0)
+		);
+	}
+
+	function drawRooms(allRooms: Room[], pixelPerUnit: number) {
+		if (!roomCanvas) return;
+		const ctx = roomCanvas.getContext('2d');
+		if (!ctx) return;
+
+		ctx.clearRect(0, 0, roomCanvas.width, roomCanvas.height);
+		ctx.textAlign = 'center';
+		ctx.font = '1.5rem sans-serif';
+
+		for (const room of allRooms) {
+			const centerX = room.x + room.width / 2;
+			const centerY = room.y + room.height / 2;
+			ctx.globalAlpha = 0.2;
+			ctx.fillStyle = 'purple';
+			ctx.fillRect(room.x, room.y, room.width, room.height);
+			ctx.globalAlpha = 1;
+			ctx.fillText(
+				`${room.name}\n${printScaled(room.width * room.height * pixelPerUnit ** 2)}`,
+				centerX,
+				centerY
+			);
+			ctx.fillText(printScaled(room.width * pixelPerUnit), centerX, room.y);
+			ctx.fillText(printScaled(room.height * pixelPerUnit), room.x, centerY);
+		}
+	}
 
 	function handleMousedown(event: MouseEvent) {
 		const { left, top } = roomCanvas.getBoundingClientRect();
 		currentRoom = {
 			name: `Room ${finishedRooms.length + 1}`,
-			x: (event.clientX - left) / scaleFactor,
-			y: (event.clientY - top) / scaleFactor,
+			x: event.clientX - left,
+			y: event.clientY - top,
 			height: 0,
 			width: 0,
 			factor: 1
@@ -67,43 +109,8 @@
 	function handleMouseMove(event: MouseEvent) {
 		if (currentRoom) {
 			const { left, top } = roomCanvas.getBoundingClientRect();
-			currentRoom.width = (event.clientX - left) / scaleFactor - currentRoom.x;
-			currentRoom.height = (event.clientY - top) / scaleFactor - currentRoom.y;
-		}
-	}
-
-	function calculatePixelsPerUnit(allRooms: Room[], totalSize: number) {
-		return Math.sqrt(
-			totalSize /
-				allRooms.reduce((prev, room) => prev + Math.abs(room.height * room.width * room.factor), 0)
-		);
-	}
-
-	function drawRooms(allRooms: Room[], pixelPerUnit: number) {
-		if (!roomCanvas) return;
-		const ctx = roomCanvas.getContext('2d');
-		if (!ctx) return;
-
-		ctx.clearRect(0, 0, roomCanvas.width, roomCanvas.height);
-		ctx.textAlign = 'center';
-		ctx.font = '40px';
-		ctx.lineWidth = 10;
-
-		for (const room of allRooms) {
-			const centerX = room.x + room.width / 2;
-			const centerY = room.y + room.height / 2;
-			ctx.globalAlpha = 0.2;
-			ctx.fillStyle = 'purple';
-
-			ctx.fillRect(room.x, room.y, room.width, room.height);
-			ctx.globalAlpha = 1;
-			ctx.fillText(
-				`${room.name}\n${printScaled(room.width * room.height * pixelPerUnit ** 2)}`,
-				centerX,
-				centerY
-			);
-			ctx.fillText(printScaled(room.width * pixelPerUnit), centerX, room.y);
-			ctx.fillText(printScaled(room.height * pixelPerUnit), room.x, centerY);
+			currentRoom.width = event.clientX - left - currentRoom.x;
+			currentRoom.height = event.clientY - top - currentRoom.y;
 		}
 	}
 
@@ -172,14 +179,14 @@
 							</div>
 						</td>
 						<td>
-							{printScaled(room.height * pixelPerUnit)}
+							{printScaled(room.height * unitsPerPixel)}
 						</td>
 						<td>
-							{printScaled(room.width * pixelPerUnit)}
+							{printScaled(room.width * unitsPerPixel)}
 						</td>
 						<td>
 							<!-- * pixelsPerUnit for square -->
-							{printScaled(room.height * room.width * pixelPerUnit ** 2)}
+							{printScaled(room.height * room.width * unitsPerPixel ** 2)}
 						</td>
 						<td style="width: min-contentq;">
 							<input type="number" class="input" style="width: 5vw;" bind:value={room.factor} />
@@ -222,6 +229,8 @@
 		position: absolute;
 		top: 0;
 		left: 0;
+		height: 100%;
+		width: 100%;
 	}
 
 	.roomCanvas {
