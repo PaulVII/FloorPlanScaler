@@ -187,6 +187,12 @@
 						<td>
 							<!-- * pixelsPerUnit for square -->
 							{printScaled(room.height * room.width * unitsPerPixel ** 2)}
+							{#if room.factor != 1.0}
+								<br />
+								(Counts as: {printScaled(
+									room.height * room.width * unitsPerPixel ** 2 * room.factor
+								)})
+							{/if}
 						</td>
 						<td style="width: min-contentq;">
 							<input type="number" class="input" style="width: 5vw;" bind:value={room.factor} />
